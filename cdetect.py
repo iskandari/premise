@@ -22,7 +22,7 @@ ap.add_argument("-i", "--image", type=str,
 args = ap.parse_args()
 
 print(args.image)
-sys.exit()
+
 
 
 def get_rotate(theta):
@@ -209,10 +209,10 @@ model.eval()
 
 #customized
 
-img_path = './images/farmacia.jpg'
+img_path = args.image
 img = Image.open(img_path)
 boxes = detect(img, model, device)
-#origbw = cv2.imread('./images/farmacia.jpg', 0)
+origbw = cv2.imread(args.image, 0)
 
 for box in boxes:
     box = box[:-1]
