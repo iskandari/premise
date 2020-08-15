@@ -12,6 +12,7 @@ import lanms
 import pytesseract
 from matplotlib import pyplot as plt
 import argparse
+import sys
 
 
 ap = argparse.ArgumentParser()
