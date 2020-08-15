@@ -11,7 +11,16 @@ from model import EAST
 import lanms
 import pytesseract
 from matplotlib import pyplot as plt
+import argparse
 
+
+ap = argparse.ArgumentParser()
+
+ap.add_argument("-i", "--image", type=str,
+	help="path to input image")
+
+print(args.image)
+sys.exit()
 
 
 def get_rotate(theta):
@@ -201,7 +210,7 @@ model.eval()
 img_path = './images/farmacia.jpg'
 img = Image.open(img_path)
 boxes = detect(img, model, device)
-origbw = cv2.imread('./images/farmacia.jpg', 0)
+#origbw = cv2.imread('./images/farmacia.jpg', 0)
 
 for box in boxes:
     box = box[:-1]
