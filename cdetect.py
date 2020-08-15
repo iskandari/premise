@@ -15,6 +15,7 @@ import argparse
 
 
 ap = argparse.ArgumentParser()
+args = parser.parse_args()
 
 ap.add_argument("-i", "--image", type=str,
 	help="path to input image")
