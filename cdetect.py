@@ -212,8 +212,7 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
     for filename in files:
 
         cnt = cnt + 1
-        if cnt == 5:
-            break
+
         print(filename, cnt)
 
         image_array.append(filename)
