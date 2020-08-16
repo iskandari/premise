@@ -13,17 +13,15 @@ import pytesseract
 from matplotlib import pyplot as plt
 import argparse
 import sys
+import pandas as pd
 
+# ap = argparse.ArgumentParser()
+# ap.add_argument("-i", "--image", type=str,
+# 	help="path to input image")
 
-ap = argparse.ArgumentParser()
-ap.add_argument("-i", "--image", type=str,
-	help="path to input image")
+# args = ap.parse_args()
 
-args = ap.parse_args()
-
-print(args.image)
-
-
+# print(args.image)
 
 def get_rotate(theta):
     '''positive theta value means rotate clockwise'''
@@ -197,9 +195,6 @@ def detect_dataset(model, device, test_img_path, submit_path):
 		with open(os.path.join(submit_path, 'res_' + os.path.basename(img_file).replace('.jpg','.txt')), 'w') as f:
 			f.writelines(seq)
 
-
-
-
 model_path = './pths/east_vgg16.pth'
 res_img = './res.bmp'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -207,34 +202,106 @@ model = EAST().to(device)
 model.load_state_dict(torch.load(model_path))
 model.eval()
 
-#customized
 
-img_path = args.image
-img = Image.open(img_path)
-boxes = detect(img, model, device)
-origbw = cv2.imread(args.image, 0)
 
-for box in boxes:
-    box = box[:-1]
-    poly = [(box[0], box[1]),(box[2], box[3]),(box[4], box[5]),(box[6], box[7])]
-    x = []
-    y = []
+cnt = 0
 
-    for coord in poly:
-        x.append(coord[0])
-        y.append(coord[1])
+image_array ,text_array =[],[]
 
-    startX = int(min(x))
-    startY = int(min(y))
-    endX = int(max(x))
-    endY = int(max(y))
+for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
+    for filename in files:
 
-    cropped_image = origbw[startY:endY, startX:endX]
+        cnt = cnt + 1
+        print(filename, cnt)
 
-    #cv2.imwrite('test.png', cropped_image)
+        image_array.append(filename)
 
-    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
-    res = clahe.apply(cropped_image)
+        img_path = './images/' + filename
+        img = Image.open(img_path)
+        boxes = detect(img, model, device)
+        orig = cv2.imread(img_path)
 
-    text = pytesseract.image_to_string(res, config = "--psm 6")
-    print(text)
+        text_str = []
+
+        if boxes is None:
+            text_array.append('')
+            continue
+
+        for box in boxes:
+
+            box = box[:-1]
+            poly = [(box[0], box[1]),(box[2], box[3]),(box[4], box[5]),(box[6], box[7])]
+            x = []
+            y = []
+
+            for coord in poly:
+                x.append(coord[0])
+                y.append(coord[1])
+
+            #add a 1px buffer to prevent too close cropping
+
+            h= orig.shape[0]
+            w= orig.shape[1]
+
+            startX = int(min(x))-1
+            startY = int(min(y))-1
+            endX = int(max(x))+1
+            endY = int(max(y))+1
+
+
+            #skip if bbox is out of image bounds
+            if startY < 0 or endY < 0 or startX < 0 or endX < 0 or startY > h or endY > h or startX > w or endX > w:
+                continue
+
+            print(startY, endY, startX, endX)
+            cropped_image = orig[startY:endY, startX:endX]
+
+
+        #    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(5,5))
+        #    res = clahe.apply(cropped_image)
+
+        #     blur = cv2.GaussianBlur(cropped_image,(5,5),0)
+        #     ret3,th3= cv2.threshold(cropped_image,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+
+
+        #     gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+        #     gray = cv2.bitwise_not(gray)
+
+        #     # threshold the image, setting all foreground pixels to
+        #     # 255 and all background pixels to 0
+        #     thresh = cv2.threshold(gray, 0, 255,
+        #         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+        #     coords = np.column_stack(np.where(thresh > 0))
+        #     angle = cv2.minAreaRect(coords)[-1]
+
+        #     if angle < -45:
+        #         angle = -(90 + angle)
+        #     else:
+        #         angle = -angle
+
+        #     (h, w) = cropped_image.shape[:2]
+        #     center = (w // 2, h // 2)
+        #     M = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+        #     unwarped = th3
+
+        #     cropped_image = cv2.warpAffine(cropped_image, M, (w, h),
+        #         flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+        #    cv2.imwrite('test' + str(cnt) + '.jpg', th3)
+
+            text = pytesseract.image_to_string(cropped_image, config='--tessdata-dir tessdata --psm 7', lang="spa")
+            text_str.append(text)
+
+        print(text_str)
+        text_array.append(text_str)
+        if not text_str:
+            text_array.append('')
+
+		if cnt == 5:
+             break
+
+final_df = pd.DataFrame({"images":image_array,"text":text_array})
+final_df.to_csv('final_df.csv')
