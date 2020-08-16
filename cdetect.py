@@ -294,7 +294,16 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
         #    cv2.imwrite('test' + str(cnt) + '.jpg', th3)
 
             text = pytesseract.image_to_string(cropped_image, config='--tessdata-dir tessdata --psm 7', lang="spa")
-            text_str.append(text)
+
+            # use regex to strip whitespace and numbers
+            text = text.strip()
+            text = re.sub(r'[^\w\s]','',text)
+            text = re.sub(r'\d+', '', text)
+
+            if len(text) > 0:
+                text_str.append(text)
+            else:
+                continue
 
         print(text_str)
         text_array.append(text_str)
