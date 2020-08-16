@@ -212,6 +212,8 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
     for filename in files:
 
         cnt = cnt + 1
+		if cnt == 5:
+			break
         print(filename, cnt)
 
         image_array.append(filename)
@@ -299,8 +301,6 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
         text_array.append(text_str)
         if not text_str:
             text_array.append('')
-		if cnt == 5:
-			break
 
 final_df = pd.DataFrame({"images":image_array,"text":text_array})
 final_df.to_csv('final_df.csv')
