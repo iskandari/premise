@@ -216,6 +216,7 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
         cnt = cnt + 1
 
         print(filename, cnt)
+        print('image_array length: ' len(image_array), 'text_array length: ', len(text_array))
 
         image_array.append(filename)
 
@@ -301,11 +302,12 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
             text = text.strip()
             text = re.sub(r'[^\w\s]','',text)
             text = re.sub(r'\d+', '', text)
+            text_str.append(text)
 
-            if len(text) > 0:
-                text_str.append(text)
-            else:
-                continue
+            # if len(text) > 0:
+            #     text_str.append(text)
+            # else:
+            #     continue
 
         print(text_str)
         text_array.append(text_str)
