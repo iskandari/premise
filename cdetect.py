@@ -306,22 +306,21 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
                     text = re.sub(r'[^\w\s]','',text)
                     text = re.sub(r'\d+', '', text)
                     text = text.lower()
-                    print(text_str)
                     text_str.append(text)
 
                 #condense list of blank spaces to one blank space or remove blank spaces
 
-                    if check(text_str) and text_str[0] == '':
-                        text_str = ''
-                    else:
-                        while '' in text_str:
-                            text_str.remove('')
+                if check(text_str) and text_str[0] == '':
+                    text_str = ''
+                else:
+                    while '' in text_str:
+                        text_str.remove('')
 
-                    if not text_str:
-                        text_str = ''
+                if not text_str:
+                    text_str = ''
 
-                    print(text_str)
-                    text_array.append(text_str)
+                print(text_str)
+                text_array.append(text_str)
 
 
 final_df = pd.DataFrame({"images":image_array,"text":text_array})
