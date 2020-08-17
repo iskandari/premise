@@ -306,8 +306,8 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
                     text = re.sub(r'[^\w\s]','',text)
                     text = re.sub(r'\d+', '', text)
                     text = text.lower()
+                    print(text_str)
                     text_str.append(text)
-
 
                 #condense list of blank spaces to one blank space or remove blank spaces
 
