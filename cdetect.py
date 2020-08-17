@@ -215,113 +215,114 @@ image_array ,text_array =[],[]
 
 for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
     for filename in files:
-
         cnt = cnt + 1
-
-        print(filename, cnt)
-        print('image_array length: ', len(image_array), 'text_array length: ', len(text_array))
-
-        image_array.append(filename)
-
-        img_path = './images/' + filename
-        img = Image.open(img_path)
-        boxes = detect(img, model, device)
-        orig = cv2.imread(img_path)
-
-        text_str = []
-
-        if boxes is None:
-            text_array.append('')
+        if cnt < 500:
             continue
-
-        for box in boxes:
-
-            box = box[:-1]
-            poly = [(box[0], box[1]),(box[2], box[3]),(box[4], box[5]),(box[6], box[7])]
-            x = []
-            y = []
-
-            for coord in poly:
-                x.append(coord[0])
-                y.append(coord[1])
-
-            #add a 1px buffer to prevent too close cropping
-
-            h= orig.shape[0]
-            w= orig.shape[1]
-
-            startX = int(min(x))-1
-            startY = int(min(y))-1
-            endX = int(max(x))+1
-            endY = int(max(y))+1
-
-
-            #skip if bbox is out of image bounds
-            if startY < 0 or endY < 0 or startX < 0 or endX < 0 or startY > h or endY > h or startX > w or endX > w:
-                continue
-
-            print(startY, endY, startX, endX)
-            cropped_image = orig[startY:endY, startX:endX]
-
-
-        #    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(5,5))
-        #    res = clahe.apply(cropped_image)
-
-        #     blur = cv2.GaussianBlur(cropped_image,(5,5),0)
-        #     ret3,th3= cv2.threshold(cropped_image,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-
-
-        #     gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
-        #     gray = cv2.bitwise_not(gray)
-
-        #     # threshold the image, setting all foreground pixels to
-        #     # 255 and all background pixels to 0
-        #     thresh = cv2.threshold(gray, 0, 255,
-        #         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-
-        #     coords = np.column_stack(np.where(thresh > 0))
-        #     angle = cv2.minAreaRect(coords)[-1]
-
-        #     if angle < -45:
-        #         angle = -(90 + angle)
-        #     else:
-        #         angle = -angle
-
-        #     (h, w) = cropped_image.shape[:2]
-        #     center = (w // 2, h // 2)
-        #     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-
-        #     unwarped = th3
-
-        #     cropped_image = cv2.warpAffine(cropped_image, M, (w, h),
-        #         flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-
-
-        #    cv2.imwrite('test' + str(cnt) + '.jpg', th3)
-
-            text = pytesseract.image_to_string(cropped_image, config='--tessdata-dir tessdata --psm 7', lang="spa")
-
-            # use regex to strip whitespace and numbers
-            text = text.strip()
-            text = re.sub(r'[^\w\s]','',text)
-            text = re.sub(r'\d+', '', text)
-            text = text.lower()
-            text_str.append(text)
-
-
-        #condense list of blank spaces to one blank space or remove blank spaces
-
-        if check(text_str) and text_str[0] == '':
-            text_str = ''
         else:
-            while '' in text_str:
-                text_str.remove('')
+            print(filename, cnt)
+            print('image_array length: ', len(image_array), 'text_array length: ', len(text_array))
 
-        print(text_str)
+            image_array.append(filename)
 
-        text_array.append(text_str)
-        if not text_str:
-            text_array.append('')
+            img_path = './images/' + filename
+            img = Image.open(img_path)
+            boxes = detect(img, model, device)
+            orig = cv2.imread(img_path)
+
+            text_str = []
+
+            if boxes is None:
+                text_array.append('')
+                continue
+            else:
+                for box in boxes:
+                    box = box[:-1]
+                    poly = [(box[0], box[1]),(box[2], box[3]),(box[4], box[5]),(box[6], box[7])]
+                    x = []
+                    y = []
+
+                    for coord in poly:
+                        x.append(coord[0])
+                        y.append(coord[1])
+
+                    #add a 1px buffer to prevent too close cropping
+
+                    h= orig.shape[0]
+                    w= orig.shape[1]
+
+                    startX = int(min(x))-1
+                    startY = int(min(y))-1
+                    endX = int(max(x))+1
+                    endY = int(max(y))+1
+
+
+                    #skip if bbox is out of image bounds
+                    if startY < 0 or endY < 0 or startX < 0 or endX < 0 or startY > h or endY > h or startX > w or endX > w:
+                        continue
+
+                    print(startY, endY, startX, endX)
+                    cropped_image = orig[startY:endY, startX:endX]
+
+
+                #    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(5,5))
+                #    res = clahe.apply(cropped_image)
+
+                #     blur = cv2.GaussianBlur(cropped_image,(5,5),0)
+                #     ret3,th3= cv2.threshold(cropped_image,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+
+
+                #     gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+                #     gray = cv2.bitwise_not(gray)
+
+                #     # threshold the image, setting all foreground pixels to
+                #     # 255 and all background pixels to 0
+                #     thresh = cv2.threshold(gray, 0, 255,
+                #         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+                #     coords = np.column_stack(np.where(thresh > 0))
+                #     angle = cv2.minAreaRect(coords)[-1]
+
+                #     if angle < -45:
+                #         angle = -(90 + angle)
+                #     else:
+                #         angle = -angle
+
+                #     (h, w) = cropped_image.shape[:2]
+                #     center = (w // 2, h // 2)
+                #     M = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+                #     unwarped = th3
+
+                #     cropped_image = cv2.warpAffine(cropped_image, M, (w, h),
+                #         flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+                #    cv2.imwrite('test' + str(cnt) + '.jpg', th3)
+
+                    text = pytesseract.image_to_string(cropped_image, config='--tessdata-dir tessdata --psm 7', lang="spa")
+
+                    # use regex to strip whitespace and numbers
+                    text = text.strip()
+                    text = re.sub(r'[^\w\s]','',text)
+                    text = re.sub(r'\d+', '', text)
+                    text = text.lower()
+                    text_str.append(text)
+
+
+                #condense list of blank spaces to one blank space or remove blank spaces
+
+                    if check(text_str) and text_str[0] == '':
+                        text_str = ''
+                    else:
+                        while '' in text_str:
+                            text_str.remove('')
+
+                    if not text_str:
+                        text_str = ''
+
+                    print(text_str)
+                    text_array.append(text_str)
+
 
 final_df = pd.DataFrame({"images":image_array,"text":text_array})
 final_df.to_csv('final_df.csv')
