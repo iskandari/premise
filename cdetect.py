@@ -216,7 +216,7 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
         cnt = cnt + 1
 
         print(filename, cnt)
-        print('image_array length: ' len(image_array), 'text_array length: ', len(text_array))
+        print('image_array length: ', len(image_array), 'text_array length: ', len(text_array))
 
         image_array.append(filename)
 
