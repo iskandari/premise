@@ -211,9 +211,6 @@ cnt = 0
 def check(list):
     return all(i == list[0] for i in list)
 
-if check(mylist) and mylist[0] == '':
-    print('yes')
-
 image_array ,text_array =[],[]
 
 for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
@@ -312,10 +309,11 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
 
 
         #condense list of blank spaces to one blank space
-
-        print(text_str)
         if check(text_str) and text_str[0] == '':
             text_str = ''
+
+        print(text_str)
+
         text_array.append(text_str)
         if not text_str:
             text_array.append('')
