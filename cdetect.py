@@ -308,9 +308,13 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
             text_str.append(text)
 
 
-        #condense list of blank spaces to one blank space
+        #condense list of blank spaces to one blank space or remove blank spaces
+
         if check(text_str) and text_str[0] == '':
             text_str = ''
+        else:
+            while '' in text_str:
+                text_str.remove('')
 
         print(text_str)
 
