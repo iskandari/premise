@@ -305,6 +305,7 @@ for subdir, dirs, files in os.walk(r'/home/ubuntu/EAST/images'):
             text = text.strip()
             text = re.sub(r'[^\w\s]','',text)
             text = re.sub(r'\d+', '', text)
+            text = text.lower()
             text_str.append(text)
 
 
