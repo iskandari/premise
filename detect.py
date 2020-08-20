@@ -72,14 +72,14 @@ def restore_polys(valid_pos, valid_geo, score_shape, scale=4):
 		x_min = x - d[2, i]
 		x_max = x + d[3, i]
 		rotate_mat = get_rotate_mat(-angle[i])
-		
+
 		temp_x = np.array([[x_min, x_max, x_max, x_min]]) - x
 		temp_y = np.array([[y_min, y_min, y_max, y_max]]) - y
 		coordidates = np.concatenate((temp_x, temp_y), axis=0)
 		res = np.dot(rotate_mat, coordidates)
 		res[0,:] += x
 		res[1,:] += y
-		
+
 		if is_valid_poly(res, score_shape, scale):
 			index.append(i)
 			polys.append([res[0,0], res[1,0], res[0,1], res[1,1], res[0,2], res[1,2],res[0,3], res[1,3]])
@@ -104,7 +104,7 @@ def get_boxes(score, geo, score_thresh=0.9, nms_thresh=0.2):
 	xy_text = xy_text[np.argsort(xy_text[:, 0])]
 	valid_pos = xy_text[:, ::-1].copy() # n x 2, [x, y]
 	valid_geo = geo[:, xy_text[:, 0], xy_text[:, 1]] # 5 x n
-	polys_restored, index = restore_polys(valid_pos, valid_geo, score.shape) 
+	polys_restored, index = restore_polys(valid_pos, valid_geo, score.shape)
 	if polys_restored.size == 0:
 		return None
 
@@ -129,8 +129,8 @@ def adjust_ratio(boxes, ratio_w, ratio_h):
 	boxes[:,[0,2,4,6]] /= ratio_w
 	boxes[:,[1,3,5,7]] /= ratio_h
 	return np.around(boxes)
-	
-	
+
+
 def detect(img, model, device):
 	'''detect text regions of img using model
 	Input:
@@ -152,7 +152,7 @@ def plot_boxes(img, boxes):
 	'''
 	if boxes is None:
 		return img
-	
+
 	draw = ImageDraw.Draw(img)
 	for box in boxes:
 		draw.polygon([box[0], box[1], box[2], box[3], box[4], box[5], box[6], box[7]], outline=(0,255,0))
@@ -169,7 +169,7 @@ def detect_dataset(model, device, test_img_path, submit_path):
 	'''
 	img_files = os.listdir(test_img_path)
 	img_files = sorted([os.path.join(test_img_path, img_file) for img_file in img_files])
-	
+
 	for i, img_file in enumerate(img_files):
 		print('evaluating {} image'.format(i), end='\r')
 		boxes = detect(Image.open(img_file), model, device)
@@ -189,9 +189,7 @@ if __name__ == '__main__':
 	model.load_state_dict(torch.load(model_path))
 	model.eval()
 	img = Image.open(img_path)
-	
+
 	boxes = detect(img, model, device)
-	plot_img = plot_boxes(img, boxes)	
+	plot_img = plot_boxes(img, boxes)
 	plot_img.save(res_img)
-
-

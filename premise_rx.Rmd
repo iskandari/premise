@@ -1,0 +1,769 @@
+---
+title: "Locating pharmacies in Mexico City"
+author: "Alexander Tedeschi"
+date: "8/17/2020"
+output:
+  html_document:
+    code_folding: hide
+    theme: "flatly"
+    toc: true
+    fig_caption: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+
+---
+
+```{r setup, include=FALSE, comment=NA}
+knitr::opts_chunk$set(echo = TRUE, comment = NA)
+
+library(reticulate)
+library(readr)
+library(stringdist)
+library(tm)
+library(quanteda)
+library(dplyr)
+library(fpc)
+library(cluster)
+library(geosphere)
+library(knitr)
+library(data.table)
+library(kableExtra)
+library(magick)
+library(ggplot2)
+library(tidyr)
+library(leaflet)
+library(stringr)
+library(wordcloud2)
+library(wordcloud)
+library(RColorBrewer)
+library(leaflet)
+library(sp)
+
+
+#download raw data
+#note that sub_id is the primary key 
+
+raw = read_csv('clustered.csv')
+copy = raw
+cluster_cnts = as.data.frame(table(raw$cluster))
+colnames(cluster_cnts) = c('cluster_number', 'cluster_cnt')
+raw = merge(raw, cluster_cnts, by.x = 'cluster', by.y = 'cluster_number')
+
+#remove unnecessary columns
+raw = raw[,c(7,8,9,10,11,12,22,24,1)]
+
+
+#download text detected by OCR
+ocr = read.csv('final_df.csv')
+
+#get Spanish stop words
+spa = tm::stopwords("spanish")
+
+#clearn up path names
+paths = c()
+
+for (i in 1:nrow(raw)){
+  clean_path = strsplit(raw$photo[i],"/")[[1]][2]
+  paths = c(paths, clean_path)
+}
+
+
+#Modify image borders
+#img <- image_read("cluster.png")
+#img_with_border <- image_border(img, "white", "20x20")
+#image_write(img, "img.png")
+#image_write(img_with_border, "cluster.png")
+```
+
+
+## Background
+
+Premise engages citizens to crowdsource data in their own communities, thereby illuminating local points of interest that are essential. Depending on the geographic region, critical facilities may not be easily discoverable with modern search engines or mapping services. The current case study is from a recent campaign in Mexico City, where contributors were asked to find and document pharmacies.  Data from contributor submissions were submitted and analyzed in order to best approximate unique locations of pharmacies and to understand surrounding features through text extraction. This study should serve as a proof of concept, or prototype, of applied statistical methods to generate insights from campaign-driven crowdsourced data and images.
+
+## Objective
+
+The project can be divided into two primary objectives: to extract meaning from images and text submitted by contributors, and to harmonize location data from geotags to devise a list of unique pharmacy locations. The desired output is a corpus of texts derived from the images, insights that be gleaned from them, and a final list of unique pharmacy locations with a corresponding confidence index.
+
+## Data 
+
+Two forms of data were provided: a directory of 898 images submitted by a total of 233 participants, and a csv file with the same number of rows, each corresponding to exactly one of the images.  The csv data combined metadata such as gps location and timestamp with form fields filled in by the participants themselves. The fields solicited questions such as how often users visited the pharmacy, whether they were confident in its quality, their opinion about the safety of the neighborhood, and so on.  More importantly, users filled out the `name` field, which proved critical to identifying specific pharmacies and differentiating between pharmacies with different names that were clustered together.
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+   print(colnames(copy))
+```
+
+### Observations
+
+Initially, a map with geotagged locations and their associated images as pop-ups was created in Mapbox for exploratory analysis ([link](https://premise.s3.ca-central-1.amazonaws.com/index.html)). After exploring the map and images, some important observations were made: 
+
+* Photos of the same pharmacy are often taken from different angles (see Fig 1) 
+* In some cases (see Fig 2), photos are ostensibly taken from the same position but there is high variation in gps
+location
+* Pharmacies of various kinds sometimes cluster together (see Fig 3)
+* A small proportion of all photos were of poor quality (see Fig 4), blurry, taken in low light conditions or inside 
+
+![Farmacia](farmacia.png){#id .class width=50% height=50%}![Farmacia del Ahorro.](ahorro.png){#id .class width=50% height=50%}
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;FIGURE 1. Unnamed pharmacy &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;FIGURE 2. Farmacia del Dr. Ahorro
+
+![Cluster of pharmacies](cluster.png){#id .class width=50% height=50%}![Poor quality.](badquality.png){#id .class width=50% height=50%}
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;FIGURE 3. Cluster of pharmacies &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;FIGURE 4. Poor quality photo 
+
+<br></br>
+
+To quantify the number of blurred images, I used the `OpenCV` package in Python to apply variation of the Laplacian ^[https://www.pyimagesearch.com/2015/09/07/blur-detection-with-opencv/], a standard method to detect blurring.  This revealed that about 8% of the total number were blurred, which as we will see has a direct impact on the quality of text able to be extracted.
+
+
+*Other assumptions*
+
+This study assumes that is GPS accuracy is within the normal range (~5m) and that participants are not using fake GPS or spoofing to mask their real location when taking photos.
+
+
+## Methodology
+
+The methodology consisted of five main components: text extraction, spatial clustering, text clustering, text matching, and building a confidence index.  Text detection, extraction, and spatial clustering were performed in Python using EAST and OCR deep learning models, while the latter was performed with DBSCAN. Text manipulation, matching, and subsequent clustering was performed in R. A custom confidence index was then designed to describe the total strength of the evidence associated with each pharmacy location, as well as an explanation about how the statistic changes. The new and old locations were then plotted on a map.
+
+<br></br>
+
+![FIGURE 5. Workflow diagram](workflow.png){#id .class width=100% height=100%}
+
+<br></br>
+
+###  EAST
+
+
+The first step in text extraction is text detection or locating text in an image.  For this study, EAST -  An **E**fficient and **A**ccurate **S**cene **T**ext Detector - was used with an existing PyTorch implementation. ^[https://github.com/SakuraRiven/EAST].  This is a robust deep learning method for text detection that performs well on unstructured text.  First, images were loaded and preprocessed with OpenCV, and a pre-trained model was configured to bound all text identified in the images. Bounding boxes were then used to crop the images into their textual fragments, and each of these fragments was passed Tesseract, the OCR engine.  The modified source code can be found in the author's [Github repository](https://github.com/iskandari/premise/blob/master/cdetect.py).
+
+![Caption for the picture.](res.bmp){#id .class width=50% height=50%}![Caption for the picture.](res (2).bmp){#id .class width=50% height=50%}
+FIGURE 6. Green bounding boxes indicated the text identified by EAST
+
+### OCR   
+
+Once bounding boxes were identified, Tesseract ^[https://medium.com/@jaafarbenabderrazak.info/ocr-with-tesseract-opencv-and-python-d2c4ec097866] - an open source OCR engine - was configured in Python to recognize text from the cropped bounding boxes for each image. The Spanish language pack was applied for this use case, and each text box was treated as a single text line. 
+
+```{python, eval=FALSE}
+pytesseract.image_to_string(cropped_image, config='--tessdata-dir tessdata --psm 7', lang="spa")
+```
+
+![Caption for the picture.](cropped1.png){#id .class width=50% height=50%}![Caption for the picture.](cropped2.png){#id .class width=50% height=50%}
+
+
+###Clustering
+
+Spatial clustering was performed first, and then for points within those spatial clusters, we used a combination of partitioning around medoids (PAM) on Levenshtein distances.   
+
+##### DBSCAN
+
+<center>
+![Diagram.](core_point.png){#id .class width=50% height=50%}
+</center>
+
+
+**De**nsity-**B**ased **S**patial **C**lustering of **A**pplications with **N**oise is an unsupervised machine learning algorithm that is good for grouping points together that are close to each other based on a distance measurement (Euclidean distance) and a minimum number of points.  The most important feature of the algorithm is that it does not require one to specify the number of clusters *a priori* and that it joins sets of radius epsilon `eps` iteratively.  Three input parameters are required:
+
+* eps: two points are considered neighbors if the distance between the two points is below the threshold `eps`
+
+* min_samples: The minimum number of neighbors a given point to have in order to be classified as a core point (clusters have a minimum size of 2)
+
+* metric:  the metric used when calculating distance between instances (i.e. Euclidean distance)
+
+For this study, 100 m was selected heuristically as the optimal radius.  In our case, it would be worse to underestimate the size of the `eps` than to overestimate it becasue there is still a second step of clustering ahead (text-based) that can pare down our results if there are too many pharmacies in a cluster.  If the initial spatial clusters are too small, then we risk starting off assuming ther are more clusters than there really are. `100 m` is an ideal measurement because it is very difficult to get a clear photo of a sign/storefront beyond that range using a mobile phone.
+
+<center>
+![Four distinct clusters in a neighborhood.](cluster_dark.png){#id .class width=50% height=50%}
+</center>
+<center>
+FIGURE 7. Four distinct clusters in a neighborhood
+</center>
+
+<BR></BR>
+
+It is important here to note that DBSCAN only takes us halfway to our objective - it is useful for identifying spatial clusters of photographs but we know from our observations (see Figure 3) that multiple pharmacies can also be spatially clustered, so how do we separate them?  After spatial clustering, we need to try to find any existing clusters within clusters using pharmacy names.  Following the next sections on text matching, the second part of clustering will be described in the section on PAM (partitioning around medoids).
+
+### Text matching
+
+Text from all fields - OCR output and user input - was cleaned by forcing to lowercase and by removing excess whitespace, punctuation, and Spanish stopwords.   ^[https://jvera.rbind.io/post/2017/10/16/spanish-stopwords-for-tidytext-package/]. 
+
+#### Levenshtein Distance
+
+To answer the very basic yet important question  - **what is the name of the pharmacy?** - we used Levenshtein Distance (LD) ^[https://bit.ly/2YdxGis].  LD is a measure of the similarity between two strings - the distance is an integer and represents the number of deletions, insertions, or substitutions (each one of these operations is counted as 1) required to transform the source string into the target string. The LD method is often used to correct spelling mistakes, which is why it was chosen as a string distance measure for this study.  On one hand, the `name` input field was prone to human spelling error, and on the other, text output from OCR was very often incomplete, missing letters and including misrecognized letters. The LD method was applied to both. 
+
+<center>
+![Levenshtein Distance.](ld.png){#id .class width=50% height=50%}
+</center>
+
+LD was used to detect common misspellings and to differentiate the word `f a r m a c i a` from the spellings of proper pharmacy names. A distance matrix was created for all of the individual words in the name column (entries of multiple words were split and each extracted). A visual inspection of the distance matrix demonstrates that if distance is lower than or equal to 3, the words `f a r m a c i a` or a close variation of this word is present.  We can also see that certain words like "farmastar" and "farmacia" have a low distance of 3, but we know that the former is the proper name of the pharmacy.  
+
+```{r, message=FALSE} 
+stringdist('farmastar', 'farmacia', method='lv') 
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+#Import Spanish stopwords
+
+raw$name = tolower(raw$name)
+stopwords_regex = paste(tm::stopwords("spanish"), collapse = '\\b|\\b')
+stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
+raw$no_stop = stringr::str_replace_all(raw$name, stopwords_regex, '')
+
+#### Exploratory analysis of farmacia string to see how it is misspelled
+
+strings = c()
+
+for (i in 1:nrow(raw)){
+  
+  words =str_extract_all(raw$no_stop[i], "[[:alpha:]]+")[[1]]
+  for (i in 1:length(words)){
+    
+    strings = c(strings, words[i])
+    
+  }
+}
+  
+
+#get unique words
+strings=unique(strings)
+similarities= c() 
+
+#construct a similarity index
+for (i in 1:length(strings)){
+  
+  cosdist = stringdist("farmacia",strings[i], method="lv")
+  similarities = c(similarities, cosdist)
+  
+}
+
+df_sims = data.frame(strings, similarities)
+df_sims = df_sims[order(df_sims$similarities),]
+colnames(df_sims) = c('name column', 'LV distance')
+
+
+display_sims = head(df_sims, n=20)
+display_sims  %>% 
+  kable(row.names = FALSE) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) %>%
+  row_spec(c(6,11,13,14,15,17,18,19), bold = T, color = "white", background = "#9370DB")
+
+#farmacia is the Spanish spelling for pharamcy 
+#use Levenshtein Distance to identify likely misspellings and construct a custom list used to remove these words
+#be careful if it is not your native language because the store name could be a play on words or pun
+
+variations = c('farmacia', 'farmcia', 'frarmacia', 'farmacias', 'farmcias', 'farmcias', 'farmamia',
+               'frmacias', 'famacias', 'famcias', 'fatmacias')
+
+
+#print(variations)
+
+#remove these words from name as if they were stop words
+
+stopwords_regex = paste(variations, collapse = '\\b|\\b')
+stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
+raw$no_pharma = stringr::str_replace_all(raw$no_stop, stopwords_regex, '')
+raw$no_pharma = gsub('[[:punct:] ]+',' ',raw$no_pharma)
+raw$no_pharma = str_squish(raw$no_pharma)
+
+
+#merging and matching with OCR texts
+  
+raw$photo = paths
+
+merged = merge(x=raw, y=ocr[, c('images', 'text')], by.y = 'images', by.x = 'photo')
+
+
+my_list=  merged %>%
+  mutate(text = gsub("\\[|'|\\]", "", text)) %>%
+  separate_rows(text , sep = ',\\s*') %>%
+  group_by(sub_id) %>%
+  summarise(text = list(text))
+
+raw = merge(raw, my_list, by='sub_id')
+
+
+#POI MATCHING
+#define function for getting Lev distance
+
+get_lv_dist = function(x) {
+  stringdist(x, 'farmacia', method='lv')
+}
+
+
+cnt = 0
+poi_match = c()
+
+for (i in 1:nrow(raw)){
+  
+  res=NULL
+  
+  mat = sapply(raw$text[i], get_lv_dist)
+ if(raw$text[i][[1]] == ''){
+   cnt = cnt + 1
+   res = FALSE
+   
+   } else { 
+  
+   if (is.matrix(mat)){
+    
+    matches = which(mat[, 1] <= 4)
+    if(length(matches) >0 ) {
+      #print(raw$text[i][[1]][matches])
+      cnt = cnt + 1
+      res = TRUE
+    } else {
+      res = FALSE
+      cnt = cnt + 1
+    }
+  }  else if (!is.matrix(mat) & mat <= 4){
+     #print(raw$text[i][[1]])
+    cnt = cnt + 1
+    res = TRUE
+  } else {
+      cnt = cnt + 1
+     res = FALSE
+  }
+}
+   poi_match = c(poi_match, res)
+}
+
+
+raw$poi_match = poi_match
+
+
+
+#NAME MATCHING !!! 
+
+cnt = 0
+name_match = c()
+
+for (i in 1:nrow(raw)){
+  
+res=NULL
+
+if(raw$no_pharma[i] != '') {    
+  
+  get_lv_dist = function(x) {
+    stringdist(x, raw$no_pharma[i], method='lv')
+  }
+  
+  mat = sapply(raw$text[i], get_lv_dist)
+  
+  if (is.matrix(mat)){
+    
+    matches = which(mat[, 1] <= 4)
+    if(length(matches) >0 ) {
+      cnt = cnt + 1
+      res = TRUE
+    } else {
+      res = FALSE
+      cnt = cnt + 1
+    }
+  } else if (!is.matrix(mat) & mat<= 4){
+    cnt = cnt + 1
+    res = TRUE
+  } else {
+    cnt = cnt + 1
+    res = FALSE
+  }
+ } else {
+        cnt = cnt + 1
+        res = FALSE
+  }
+  name_match = c(name_match, res)
+  
+}
+
+raw$name_match = name_match
+
+```
+
+The purple colored records above show low distance words that actually represent <p style="display:inline; color:#9370DB">proper pharmacy names.</p>  Since we do not want to remove these words as they contain important information, we cannot simply use an arbitrary distance threshold such as 3.  One solution is to manually compose a list of common misspellings from the distance matrix.  This list was then used to mask the `name` column and derive the proper names of pharmacies (see below).
+
+```{r, echo = FALSE}
+
+print(variations)
+
+example = cbind(raw[7], raw[10], raw[11])
+colnames(example) = c('original', 'minus_stop_words', 'proper_name')
+example = example[sample(nrow(example), 5), ]
+
+example  %>% 
+  kable(row.names = FALSE) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) %>%
+  column_spec(3, bold = T, color= "#9370DB")
+
+```
+
+
+#####  PAM 
+
+Clustering within spatial clusters is the final step in locating pharmacies.  DBSCAN was a good start, but it needs to be taken one step further.  PAM or partitioning around medoids is a clustering algorithm that is a classical partitioning technique ^[https://en.wikipedia.org/wiki/K-medoids] , clustering the dataset of *n* objects in to *k* clusters.  After creating a Levenshtein distance matrix for each unique spatial cluster, we can use apply PAM to cluster pharmacy names within these clusters.  
+
+The example below shows how PAM was able to split one 14 point cluster into two - a 12-point and 2-point cluster - based solely on pharmacy name. If pharmacies had blank names (this was only in 3% of submissions) and fell into a spatial cluster with named pharmacies, then they were assumed to belong to that cluster.  In the case of multiple pharmacy clusters, a blank name would be assigned to the cluster whose spatial mean was closest to its location. In the case of a cluster of blank names, the final location name is an `NA` value.
+
+```{r cluster, echo=FALSE, warning=FALSE, message=FALSE}
+
+indexFun <- function(x) {
+  1- 1/sqrt(x)
+}
+
+
+final_rx = data.frame(
+                cluster_id=numeric(),
+                mean_lon=numeric(),
+                mean_lat=numeric(),
+                new_cluster_id=integer(), 
+                name=character(),
+                la_index=numeric(),
+                poi_index=numeric(),
+                users=integer(),
+                stringsAsFactors=FALSE) 
+
+
+
+solo = raw[raw$cluster == -1,] 
+
+solo['cluster_id'] <- NA
+solo['mean_lon'] = NA
+solo['mean_lat']= NA
+solo['new_cluster_id'] = NA
+solo['la_index'] = NA
+solo['poi_index'] = NA
+solo['users'] = 1
+
+for (i in 1:nrow(solo)){
+  
+solo$cluster_id[i] = solo$cluster[i]
+solo$mean_lon[i] = solo$lon[i]
+solo$mean_lat[i] = solo$lat[i]
+solo$new_cluster_id[i] = solo$cluster_id[i]
+solo$la_index[i] = 0
+solo$poi_index[i] = indexFun(1 + sum(solo$poi_match[i], solo$name_match[i]))
+
+}
+
+solo = solo[,c(15,16,17,18,7,19,20,21)]
+
+
+
+
+#################
+
+### separate empty string clusters and keep them with the same cluster_id 
+null_values_no_solo = raw[raw$cluster != -1 & raw$no_pharma == '' ,]
+##
+null_clusters =  null_values_no_solo %>% 
+                group_by(cluster, cluster_cnt) %>% 
+                summarise(total = n()) 
+
+null_clusters = null_clusters[null_clusters$cluster_cnt == null_clusters$total,]
+empty_clusters = null_values_no_solo[null_values_no_solo$cluster %in% null_clusters$cluster,]
+
+
+#save for later
+null_values_no_solo = null_values_no_solo[!null_values_no_solo$cluster %in% null_clusters$cluster,]
+################
+
+
+for( i in 1:length(null_clusters$cluster)){
+  
+   samp = empty_clusters[empty_clusters$cluster == null_clusters$cluster[i],]
+
+   j= nrow(final_rx)
+   
+   cluster_id = unique(samp$cluster)
+   mean_lon =  mean(samp$lon)
+   mean_lat = mean(samp$lat)
+   new_cluster_id = as.integer(unique(samp$cluster))
+   name = 'NA'
+   la_index = indexFun(length(unique(samp$user_id)))
+   poi_index =  indexFun(sum(samp$poi_match) + sum(samp$name_match))     
+   users = length(unique(samp$user_id))
+   
+   final_rx[j+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users)
+
+}
+
+
+
+#clusters 
+no_solo = raw[raw$cluster != -1 & !raw$cluster %in% null_clusters$cluster,]
+no_solo_clusters = unique(no_solo$cluster)
+
+
+for (i in 1:length(unique(no_solo$cluster))){
+
+#subset by cluster id
+  cluster_id =  no_solo_clusters[i]  
+  samp = no_solo[no_solo$cluster == cluster_id,] 
+  
+#if only two pharmacies in cluster, just check L distance 
+#if one or both of the pharmacy names is blank, assume they belong to the same cluster
+
+  z= nrow(final_rx)
+  
+  if (dim(samp)[1] == 2) {
+  
+  if(samp$no_pharma[1] == '' |  samp$no_pharma[2] == ''){
+    
+    mean_lon =  mean(samp$lon)
+    mean_lat = mean(samp$lat)
+    new_cluster_id = samp$cluster[1]
+    name = ifelse(subset(samp$no_pharma, samp$no_pharma!= '')==0, 
+                  NA, subset(samp$no_pharma, samp$no_pharma!= '')[1])
+    la_index = indexFun(length(unique(samp$user_id)))
+    poi_index =  indexFun(1 + sum(samp$poi_match) + sum(samp$name_match))     
+    users = length(unique(samp$user_id))
+    
+    final_rx[z+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users)
+    
+    
+  } else {
+    
+    
+  dist = stringdist(samp$no_pharma[1], samp$no_pharma[2], method="lv")
+  
+          if(dist > 3){  #separate clusters
+          
+            new_cluster_id = 1
+            mean_lon =  mean(samp[1,]$lon)
+            mean_lat = mean(samp[1,]$lat)
+            new_cluster_id = 1
+            name = samp[1,]$name
+            la_index = indexFun(length(unique(samp[1,]$user_id)))
+            poi_index =  indexFun(1 + sum(samp[1,]$poi_match) + sum(samp[1,]$name_match))     
+            users = length(unique(samp[1,]$user_id))
+        
+            final_rx[z+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users)    
+            
+            new_cluster_id = 2
+            mean_lon =  mean(samp[2,]$lon)
+            mean_lat = mean(samp[2,]$lat)
+            new_cluster_id = 2
+            name = samp[2,]$name
+            la_index = indexFun(length(unique(samp[2,]$user_id)))
+            poi_index =  indexFun(2 + sum(samp[2,]$poi_match) + sum(samp[2,]$name_match))     
+            users = length(unique(samp[2,]$user_id))  
+            
+            final_rx[z+2,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users)
+            
+          } else {
+          
+            mean_lon =  mean(samp$lon)
+            mean_lat = mean(samp$lat)
+            new_cluster_id = as.integer(unique(samp$cluster))
+            name = samp$name[1]
+            la_index = indexFun(length(unique(samp$user_id)))
+            poi_index =  indexFun(1 + sum(samp$poi_match) + sum(samp$name_match))     
+            users = length(unique(samp$user_id))
+            final_rx[z+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users)  
+          
+        }
+     }
+  }  else {
+  
+    
+d  <- adist(samp$no_pharma)
+
+#rownames(d) <- str
+#hc <- hclust(as.dist(d))
+#plot(hc)
+#rect.hclust(hc,k=2)
+
+#add rule if no integer in the dissimilarity matrix is greater than 3, skip and call it
+#one cluster
+
+if(length(d[d>3]) == 0 ) { 
+  
+  mean_lon =  mean(samp$lon)
+  mean_lat = mean(samp$lat)
+  new_cluster_id = as.integer(unique(samp$cluster))
+  name = samp$name[1]
+  la_index = indexFun(length(unique(samp$user_id)))
+  poi_index =  indexFun(1 + sum(samp$poi_match) + sum(samp$name_match))     
+  users = length(unique(samp$user_id))
+  final_rx[z+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users) 
+
+    } else {
+
+    pamk.best <- fpc::pamk(d, krange=c(2:(dim(d)[2]-1)))
+    k = unname(pamk.best$pamobject$clustering)
+    samp$new_cluster = k
+    
+      for(y in 1:length(unique(k))){
+        
+        z= nrow(final_rx)
+        new_samp = samp[samp$new_cluster == y,]
+        mean_lon =  mean(new_samp$lon)
+        mean_lat = mean(new_samp$lat)
+        new_cluster_id = y
+        name = new_samp$name[1]
+        la_index = indexFun(length(unique(new_samp$user_id)))
+        poi_index =  indexFun(1 + sum(new_samp$poi_match) + sum(new_samp$name_match))     
+        users = length(unique(new_samp$user_id))
+        final_rx[z+1,] <- c(cluster_id, mean_lon, mean_lat, new_cluster_id, name, la_index, poi_index, users) 
+        
+      }
+    
+   }
+}
+
+}
+
+#dim(final_rx)
+final_rx = rbind(solo, final_rx)
+
+
+```
+
+![Caption for the picture.](silhouette.png){#id .class width=50% height=50%}![Caption for the picture.](clustplot.png){#id .class width=50% height=50%}
+
+```{r, echo=FALSE}
+
+samp = raw[raw$cluster == 50,]
+str = samp$no_pharma
+str= str_trim(str)
+d  <- adist(str)
+rownames(d) <- str
+pamk.best <- fpc::pamk(d, krange=c(2:(dim(d)[2]-1)))
+nc=pamk.best$nc
+hc <- hclust(as.dist(d))
+plot(hc)
+rect.hclust(hc,k=nc)
+
+```
+
+
+
+
+###Confidence index
+
+#### Location accuracy 
+
+Without ground truth measurements, it is not possible to build a predictive model and identify the most meaningful variables (number of unique user submissions, presence of correctly matching text in photo, etc) in locating pharmacies or other points of interests from crowdsourced data. However, one can take an heuristic approach based on the Central Limit Theorem ^[https://en.wikipedia.org/wiki/Central_limit_theorem] and make the assumption that the higher the sample size (individual contributions), the more the likely the sample mean (in this case the sample *spatial* mean) will equal the population mean.  Although in this study, the *population* is an abstract concept (it could be represented, for example, by the total number of residents in Mexico City submitting photos of one pharmacy), the concept of distribution makes sense.  As a general rule, sample sizes equal to or greater than 30 are sufficient for the Central Limit Theorem to hold.  Based on this concept, a simple method can be devised to rate our confidence in location accuracy, which is undoubtedly a function of sample size.
+
+Given a theoretical Pharmacy A, every incremental participant that documents the location of Pharmacy A after the first one is valuable up to a certain extent. Two unique users verifying the of location Pharmacy A is far better than one, and three is significantly better than two. Starting with zero, each incremental user's verification becomes slightly less valuable than the previous one, however, a new user "contributes" much more to the confidence score when the sample size is low.  This can be represented mathematically as a limit function, where the score will always be between 0 and 1 but never converge to 1:  
+
+<center>
+$$\lim_{x\to\infty} f(1- \frac{1}{\sqrt{x}})$$
+</center> 
+
+Thus, a sample size of 1 will acheive a score of **0**, but a sample size of 2 will acheive **0.29**, 3 will achieve **0.42**, 4 a **0.5**, and so on.  Of course, this model should be tested with ground truth data, because there may be a better one that fits (maybe in reality less than 30 samples are needed to generate high confidence and the model can be replaced with one that it converges faster to 1).  
+
+#### Point-of-interest (POI) matching accuracy
+
+POI matching should not have any bearing on location accuracy. It as apparent from the dataset that photos submitted at highly variable locations often show the exact same object (pharmacy) from the same angle.  This means that we should avoid triangulating distances using the image and instead focus on the substance of the text.  Is the object in the image actually the point-of-interest that we are interested in?  We have used OCR to extract text from the images, the LD method to determine: 1. whether or not image text matches  `f a r m a c i a` and, where possible, 2: whether the image text matches the name of the pharmacy input by the user. 
+
+Each photo can threfore have betwen 0 and 2 text matches, which should be treated using the same cumulative exponential logic as location accuracy.  The more matches, the higher our confidence that a particular point-of-interest is what participants say it is.  Given the difficulty of accurately extracting text from natural scenes, if one submission produces two matches, each match should contribute to *n*, and the same limit function should be applied to derive a POI score.
+
+
+```{r}
+
+indexFun <- function(x) {
+  1- 1/sqrt(x)
+}
+
+p9 <- ggplot(data.frame(x = c(1, 30)), aes(x = x)) +
+  stat_function(fun = indexFun, colour = "dodgerblue3",  size = 1.5) +
+  ggtitle("Confidence index of locations and POI type") +
+  xlab("Unique users / matches") + ylab("Confidence Index CI")
+  
+p9
+
+```
+
+
+## Results
+
+Point-of-interest matching produced positive results, with over 50% of photos containing text approximating `f a r m a c i a`  , and over 50% of photos containing text that matched the `name` field of the submission.  However, because the number of unique users submitting photos for each location was relatively low, the location accuracy confidence score was
+
+
+
+Below, a final map can be seen with most likely locations of pharmacies based on the data. The number of points was **reduced from 898 to 544, or by 39%**.
+
+```{r}
+
+pal <- colorFactor(c("navy", "red"), domain = c("new", "old"))
+
+final_rx$mean_lat= as.numeric(final_rx$mean_lat)
+final_rx$mean_lon= as.numeric(final_rx$mean_lon)
+
+xy <- final_rx[,c(2,3)]
+
+spdf <- SpatialPointsDataFrame(coords = xy, data = final_rx,
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+rxy = raw[,c(6,5)]
+
+rspdf <- SpatialPointsDataFrame(coords = rxy, data =raw,
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+
+m <- leaflet() %>% setView(lng = -99.1332, lat = 19.4326, zoom = 15)
+m %>% addProviderTiles(providers$CartoDB.Positron) %>%
+    addMarkers(
+    data = spdf,
+    popup = spdf$name
+  )  %>%
+    addCircleMarkers(
+    data = rspdf,
+    popup = rspdf$name,
+    radius = 3,
+    color = 'red',
+    stroke = FALSE, fillOpacity = 0.5
+  )
+  
+```
+
+What other insights did we get from OCR?  The texts also provided information about other services and points of interest located in and around the pharmacies.  For example, the words could also tell us about surrounding points of interest - for example the word `medico` (eng. 'doctor') came up nearly 100 times and `consultorio` ('office') came up over 50 times.  Also frequently present were words like `recargas` ('phone top up') and `servicio` ('service'). 
+
+
+```{r, message = FALSE, echo = FALSE}
+bag = c()
+
+for(i in 1:nrow(raw)){
+
+t = raw$text[i][[1]] 
+bag = c(bag, t)
+  
+}
+
+bag = str_trim(bag)
+bag = stringr::str_replace_all(bag, stopwords_regex, '')
+bag = bag[bag != '']
+bag= bag[str_length(bag) > 1]
+bow = as.data.frame(table(bag))
+colnames(bow) = c('term', 'freq')
+
+wordcloud(words = bow$term, freq = bow$freq, min.freq = 10,          
+          max.words=200, random.order=FALSE, rot.per=0.35,            
+          colors=brewer.pal(8, "Dark2"))
+
+#mean poi index
+#mean(as.numeric(final_rx$poi_index[is.finite(as.numeric(final_rx$poi_index))]))
+
+#mean name match index
+#mean(as.numeric(final_rx$la_index[is.finite(as.numeric(final_rx$la_index))]))
+
+
+
+```
+
+Overall, our mean location accuracy and point-of-interest confidence scores were low, with a mean of `.03` and `0.28`, respectively.  These numbers are not as indicative of bad accuracy as they are of too low a sample size.  We should still have confidence in low index scores, but they are a signal that we need to incentivize more participants to make more submissions.
+
+### Limitations 
+
+Small sample sizes were the main limitation - the mean number of unique users per final location was only 1.2, which equates to less accuracy in the spatial means of clustered points.  Furthermore, even with the latest technology, OCR is difficult to apply successfully to images in the wild, which means that it is not advisable to place too much importance on extracted text. In light of this, the current study relied heavily on the names submitted by the  participants themseleves (the more unique participants submitting the same names at the same locations, the better). 
+
+### Alternative methods
+
+*   Experiment with verifying locations with Google Street View images in the near vicinity if it is cost-effective
+*   Incentivize more participants to obtain a larger number of samples per pharmacy
+*   Hire a local fixer - someone that can manually verify locations from the output of this pipeline.
+
+##Recommendations
+
+More research should be done into industry grade OCR pipelines for text extraction. Participants should be incentivized to take more photos to increase `n`, and there should be a designated team member collecting ground truth data to help train future models.
+
+

@@ -66,7 +66,7 @@ class extractor(nn.Module):
 		if pretrained:
 			vgg16_bn.load_state_dict(torch.load('./pths/vgg16_bn-6c64b313.pth'))
 		self.features = vgg16_bn.features
-	
+
 	def forward(self, x):
 		out = []
 		for m in self.features:
@@ -104,7 +104,7 @@ class merge(nn.Module):
 		self.conv7 = nn.Conv2d(32, 32, 3, padding=1)
 		self.bn7 = nn.BatchNorm2d(32)
 		self.relu7 = nn.ReLU()
-		
+
 		for m in self.modules():
 			if isinstance(m, nn.Conv2d):
 				nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -117,19 +117,19 @@ class merge(nn.Module):
 	def forward(self, x):
 		y = F.interpolate(x[3], scale_factor=2, mode='bilinear', align_corners=True)
 		y = torch.cat((y, x[2]), 1)
-		y = self.relu1(self.bn1(self.conv1(y)))		
+		y = self.relu1(self.bn1(self.conv1(y)))
 		y = self.relu2(self.bn2(self.conv2(y)))
-		
+
 		y = F.interpolate(y, scale_factor=2, mode='bilinear', align_corners=True)
 		y = torch.cat((y, x[1]), 1)
-		y = self.relu3(self.bn3(self.conv3(y)))		
+		y = self.relu3(self.bn3(self.conv3(y)))
 		y = self.relu4(self.bn4(self.conv4(y)))
-		
+
 		y = F.interpolate(y, scale_factor=2, mode='bilinear', align_corners=True)
 		y = torch.cat((y, x[0]), 1)
-		y = self.relu5(self.bn5(self.conv5(y)))		
+		y = self.relu5(self.bn5(self.conv5(y)))
 		y = self.relu6(self.bn6(self.conv6(y)))
-		
+
 		y = self.relu7(self.bn7(self.conv7(y)))
 		return y
 
@@ -153,20 +153,20 @@ class output(nn.Module):
 		score = self.sigmoid1(self.conv1(x))
 		loc   = self.sigmoid2(self.conv2(x)) * self.scope
 		angle = (self.sigmoid3(self.conv3(x)) - 0.5) * math.pi
-		geo   = torch.cat((loc, angle), 1) 
+		geo   = torch.cat((loc, angle), 1)
 		return score, geo
-		
-	
+
+
 class EAST(nn.Module):
 	def __init__(self, pretrained=True):
 		super(EAST, self).__init__()
 		self.extractor = extractor(pretrained)
 		self.merge     = merge()
 		self.output    = output()
-	
+
 	def forward(self, x):
 		return self.output(self.merge(self.extractor(x)))
-		
+
 
 if __name__ == '__main__':
 	m = EAST()
